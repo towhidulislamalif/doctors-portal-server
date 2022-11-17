@@ -51,6 +51,10 @@ async function run() {
       const result = await cursor.toArray();
       // ! steps
       const bookingQuery = { appointment_date: date };
+      // console.log(
+      //   '🚀 ~ file: index.js ~ line 55 ~ app.get ~ bookingQuery',
+      //   bookingQuery
+      // );
       const booked = await BookingAppointment.find(bookingQuery).toArray();
       // console.log('🚀 ~ file: index.js ~ line 55 ~ app.get ~ booked', booked);
       result.forEach((option) => {
@@ -60,12 +64,16 @@ async function run() {
         //   bookedOption
         // );
         const bookedSlot = bookedOption.map((b) => b.slot);
+        const remaining = option.slots.filter(
+          (slot) => !bookedSlot.includes(slot)
+        );
         // console.log(
         //   '🚀 ~ file: index.js ~ line 63 ~ result.forEach ~ bookedSlot',
         //   date,
         //   option.name,
-        //   bookedSlot
+        //   remaining.length
         // );
+        option.slots = remaining;
       });
       res.send(result);
     });
@@ -77,6 +85,18 @@ async function run() {
         '🚀 ~ file: index.js ~ line 55 ~ app.post ~ booking',
         booking
       );
+      const query = {
+        appointment_date: booking.appointment_date,
+        email: booking.email,
+        treatment: booking.treatment,
+      };
+      const alreadybooked = await BookingAppointment.find(query).toArray();
+      if (alreadybooked.length) {
+        return res.send({
+          acknowledged: false,
+          message: `You already have a booking on ${booking.appointment_date}`,
+        });
+      }
       const result = await BookingAppointment.insertOne(booking);
       res.send(result);
     });
