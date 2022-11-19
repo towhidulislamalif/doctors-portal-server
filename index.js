@@ -1,8 +1,9 @@
 // * require
 const express = require('express');
 const cors = require('cors');
+const jwt = require('jsonwebtoken');
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const app = express();
 
@@ -17,6 +18,22 @@ const port = process.env.PORT || 5000;
 app.get('/', (req, res) => {
   res.send('Hello World!');
 });
+
+//verify jwt
+function verifyjwt(req, res, next) {
+  const authHead = req.headers.authorization;
+  if (!authHead) {
+    return res.status(401).send('Unauthorized');
+  }
+  const token = authHead.split(' ')[1];
+  jwt.verify(token, process.env.TOKEN, function (err, decoded) {
+    if (err) {
+      return res.status(401).send('Unauthorized');
+    }
+    req.decoded = decoded;
+    next();
+  });
+}
 
 // * mongodb
 const uri = process.env.DB_URI;
@@ -34,12 +51,25 @@ const client = new MongoClient(uri, {
 // });
 async function run() {
   try {
+    const Usersdata = client.db('doctorsportal').collection('usersdata');
+    const DoctorsData = client.db('doctorsportal').collection('doctorsdata');
     const AppointmentOptions = client
       .db('doctorsportal')
       .collection('appointmentoptions');
     const BookingAppointment = client
       .db('doctorsportal')
       .collection('bookingappointment');
+
+    // * make sure you use verify admin after verify jwt
+    const verifyAdmin = async (req, res, next) => {
+      const decodedEmail = req.decoded.email;
+      const query = { email: decodedEmail };
+      const user = await Usersdata.findOne(query);
+      if (user?.role !== 'Admin') {
+        return res.status(403).send({ message: 'Forbidden access' });
+      }
+      next();
+    };
 
     // * end points
     // ! use aggregate to query multiple collection and then merge data!
@@ -50,6 +80,8 @@ async function run() {
       const cursor = AppointmentOptions.find(query);
       const result = await cursor.toArray();
       // ! steps
+
+      // ! get the bookings of the provided date
       const bookingQuery = { appointment_date: date };
       // console.log(
       //   '🚀 ~ file: index.js ~ line 55 ~ app.get ~ bookingQuery',
@@ -79,12 +111,25 @@ async function run() {
     });
 
     // * end points
+    app.get('/bookingappointment', verifyjwt, async (req, res) => {
+      const email = req.query.email;
+      const decodedEmail = req.decoded.email;
+      if (email !== decodedEmail) {
+        return res.status(401).send('Unauthorized');
+      }
+      // console.log('🚀 ~ file: index.js ~ line 86 ~ app.get ~ email', email);
+      const query = { email: email };
+      const bookings = await BookingAppointment.find(query).toArray();
+      res.send(bookings);
+    });
+
+    // * end points
     app.post('/bookingappointment', async (req, res) => {
       const booking = req.body;
-      console.log(
-        '🚀 ~ file: index.js ~ line 55 ~ app.post ~ booking',
-        booking
-      );
+      // console.log(
+      //   '🚀 ~ file: index.js ~ line 55 ~ app.post ~ booking',
+      //   booking
+      // );
       const query = {
         appointment_date: booking.appointment_date,
         email: booking.email,
@@ -98,6 +143,96 @@ async function run() {
         });
       }
       const result = await BookingAppointment.insertOne(booking);
+      res.send(result);
+    });
+
+    // * end points
+    app.get('/jwt', async (req, res) => {
+      const email = req.query.email;
+      const query = { email: email };
+      const result = await Usersdata.findOne(query);
+      // console.log('🚀 ~ file: index.js ~ line 122 ~ app.get ~ result', result);
+      if (result) {
+        const token = jwt.sign({ email }, process.env.TOKEN, {
+          expiresIn: '1d',
+        });
+        return res.send({
+          success: true,
+          token: token,
+        });
+      }
+      res.status(401).send({
+        success: false,
+        message: 'Unauthorized',
+        token: '',
+      });
+    });
+
+    // * end points
+    app.get('/users', async (req, res) => {
+      const query = {};
+      const users = await Usersdata.find(query).toArray();
+      res.send(users);
+    });
+
+    // * end points
+    app.post('/users', async (req, res) => {
+      const user = req.body;
+      // console.log('🚀 ~ file: index.js ~ line 119 ~ app.post ~ user', user);
+      const result = await Usersdata.insertOne(user);
+      res.send(result);
+    });
+
+    // * end points
+    app.get('/users/admin/:email', async (req, res) => {
+      const email = req.params.email;
+      const query = { email };
+      const user = await Usersdata.findOne(query);
+      res.send({ isAdmin: user?.role === 'Admin' });
+    });
+
+    // * end points
+    app.put('/users/admin/:id', verifyjwt, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: ObjectId(id) };
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: {
+          role: 'Admin',
+        },
+      };
+      const result = await Usersdata.updateOne(filter, updateDoc, options);
+      res.send(result);
+    });
+
+    // * end points
+    app.get('/specialty', async (req, res) => {
+      const query = {};
+      const result = await AppointmentOptions.find(query)
+        .project({ name: 1 })
+        .toArray();
+      res.send(result);
+    });
+
+    // * end points
+    app.get('/doctors', verifyjwt, verifyAdmin, async (req, res) => {
+      const query = {};
+      const result = await DoctorsData.find().toArray();
+      res.send(result);
+    });
+
+    // * end points
+    app.post('/doctors', verifyjwt, verifyAdmin, async (req, res) => {
+      const doctor = req.body;
+      const result = await DoctorsData.insertOne(doctor);
+      res.send(result);
+    });
+
+    // * end points
+    app.delete('/doctors/:id', verifyjwt, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: ObjectId(id) };
+      const result = await DoctorsData.deleteOne(filter);
       res.send(result);
     });
   } finally {
