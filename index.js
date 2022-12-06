@@ -4,6 +4,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const stripe = require('stripe')(process.env.STRIPE_KEY);
 
 const app = express();
 
@@ -124,6 +125,14 @@ async function run() {
     });
 
     // * end points
+    app.get('/bookingappointment/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: ObjectId(id) };
+      const result = await BookingAppointment.findOne(query);
+      res.send(result);
+    });
+
+    // * end points
     app.post('/bookingappointment', async (req, res) => {
       const booking = req.body;
       // console.log(
@@ -206,6 +215,31 @@ async function run() {
     });
 
     // * end points
+    app.delete('/users/:id', verifyjwt, verifyAdmin, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: ObjectId(id) };
+      const result = await Usersdata.deleteOne(filter);
+      res.send(result);
+    });
+
+    // * end points
+    app.get('/addprice', async (req, res) => {
+      const filter = {};
+      const options = { upsert: true };
+      const updateDoc = {
+        $set: {
+          price: 99,
+        },
+      };
+      const result = await AppointmentOptions.updateMany(
+        filter,
+        updateDoc,
+        options
+      );
+      res.send(result);
+    });
+
+    // * end points
     app.get('/specialty', async (req, res) => {
       const query = {};
       const result = await AppointmentOptions.find(query)
@@ -217,7 +251,8 @@ async function run() {
     // * end points
     app.get('/doctors', verifyjwt, verifyAdmin, async (req, res) => {
       const query = {};
-      const result = await DoctorsData.find().toArray();
+      // const result = await DoctorsData.find().toArray();
+      const result = await DoctorsData.find(query).toArray();
       res.send(result);
     });
 
@@ -234,6 +269,22 @@ async function run() {
       const filter = { _id: ObjectId(id) };
       const result = await DoctorsData.deleteOne(filter);
       res.send(result);
+    });
+
+    // ! stripe payment
+    app.post('/create-payment-intent', async (req, res) => {
+      const booking = req.body;
+      const price = booking.price;
+      const amount = parseFloat(price * 100);
+      // Create a PaymentIntent with the order amount and currency
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: 'usd',
+        payment_method_types: ['card'],
+      });
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
     });
   } finally {
   }
